@@ -106,38 +106,25 @@ export const uploadAsset = (req, res) => {
     }
     
     const { id } = req.params;
-    const { default: isDefault } = req.query;
     const filePath = req.file.path;
+    const tags = req.validatedTags || [];
     
-    // If marked as default, we might need to rename or tag the file
-    if (isDefault === 'true') {
-      const dir = path.dirname(filePath);
-      const ext = path.extname(filePath);
-      const filename = path.basename(filePath, ext);
-      
-      // Rename the file to include "default" in the name
-      const newPath = path.join(dir, `${filename}-default${ext}`);
-      fs.renameSync(filePath, newPath);
-      
-      return res.status(201).json({
-        success: true,
-        message: 'Asset uploaded successfully and set as default',
-        asset: {
-          id,
-          path: newPath.replace(/\\/g, '/'),
-          default: true
-        }
-      });
-    }
+    // Create metadata
+    const metadata = {
+      id,
+      path: filePath.replace(/\\/g, '/'),
+      tags,
+      uploadDate: new Date().toISOString()
+    };
+
+    // Save metadata
+    const metadataPath = path.join(path.dirname(filePath), 'metadata.json');
+    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
     
     res.status(201).json({
       success: true,
       message: 'Asset uploaded successfully',
-      asset: {
-        id,
-        path: filePath.replace(/\\/g, '/'),
-        default: false
-      }
+      asset: metadata
     });
     
   } catch (error) {
@@ -154,11 +141,8 @@ export const uploadAsset = (req, res) => {
 export const getAssetList = (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Use the helper function to get the directory path
     const dir = getAssetDirectoryPath(id);
     
-    // Check if directory exists
     if (!fs.existsSync(dir)) {
       return res.status(404).json({
         success: false,
@@ -166,23 +150,30 @@ export const getAssetList = (req, res) => {
       });
     }
     
-    // Read directory to find files
     const files = fs.readdirSync(dir);
     
-    // Get details for each file
-    const assets = files.map(file => {
-      const filePath = path.join(dir, file);
-      const stats = fs.statSync(filePath);
-      
-      return {
-        name: file,
-        path: filePath.replace(/\\/g, '/'),
-        size: stats.size,
-        isDefault: file.includes('default'),
-        createdAt: stats.birthtime,
-        modifiedAt: stats.mtime
-      };
-    });
+    // Get details for each file, excluding metadata.json
+    const assets = files
+      .filter(file => file !== 'metadata.json')
+      .map(file => {
+        const filePath = path.join(dir, file);
+        const stats = fs.statSync(filePath);
+        const metadataPath = path.join(dir, 'metadata.json');
+        let metadata = {};
+        
+        if (fs.existsSync(metadataPath)) {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        return {
+          name: file,
+          path: filePath.replace(/\\/g, '/'),
+          size: stats.size,
+          tags: metadata.tags || [],
+          createdAt: stats.birthtime,
+          modifiedAt: stats.mtime
+        };
+      });
     
     res.json({
       success: true,
@@ -200,87 +191,45 @@ export const getAssetList = (req, res) => {
   }
 };
 
-// Set an asset as default
-export const setDefaultAsset = async (req, res) => {
+// Remove setDefaultAsset export and function completely
+
+/**
+ * Update tags for an existing asset
+ */
+export const updateAssetTags = async (req, res) => {
   try {
-    const { id, filename } = req.params;
+    const { id } = req.params;
+    const tags = req.validatedTags || [];
     
-    // Use the helper function to get the directory path
-    const dir = getAssetDirectoryPath(id);
+    // Read the asset metadata file
+    const metadataPath = path.join(process.cwd(), 'assets', id.slice(0, 2), id.slice(2, 4), id.slice(4, 6), id, 'metadata.json');
     
-    // Check if directory exists
-    if (!fs.existsSync(dir)) {
+    if (!fs.existsSync(metadataPath)) {
       return res.status(404).json({
         success: false,
-        message: 'Asset folder not found'
+        message: 'Asset not found'
       });
     }
+
+    // Read and parse existing metadata
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
     
-    // Read directory to find files
-    const files = fs.readdirSync(dir);
+    // Update tags
+    metadata.tags = tags;
     
-    // Check if the requested file exists
-    if (!files.includes(filename)) {
-      return res.status(404).json({
-        success: false,
-        message: 'File not found'
-      });
-    }
-    
-    // First, remove default flag from any existing default files
-    for (const file of files) {
-      if (file.includes('-default')) {
-        // Get the name without default flag
-        const baseName = file.replace('-default', '');
-        const ext = path.extname(baseName);
-        const nameWithoutExt = baseName.substring(0, baseName.length - ext.length);
-        
-        // Rename to remove default flag
-        const oldPath = path.join(dir, file);
-        const newPath = path.join(dir, `${nameWithoutExt}${ext}`);
-        fs.renameSync(oldPath, newPath);
-      }
-    }
-    
-    // Now set the new file as default
-    const ext = path.extname(filename);
-    const nameWithoutExt = filename.substring(0, filename.length - ext.length);
-    
-    // Check if the file already has a default flag
-    if (!nameWithoutExt.includes('-default')) {
-      const oldPath = path.join(dir, filename);
-      const newPath = path.join(dir, `${nameWithoutExt}-default${ext}`);
-      fs.renameSync(oldPath, newPath);
-      
-      return res.json({
-        success: true,
-        message: 'Asset set as default',
-        asset: {
-          id,
-          name: `${nameWithoutExt}-default${ext}`,
-          path: newPath.replace(/\\/g, '/'),
-          default: true
-        }
-      });
-    } else {
-      // File is already default
-      return res.json({
-        success: true,
-        message: 'Asset is already set as default',
-        asset: {
-          id,
-          name: filename,
-          path: path.join(dir, filename).replace(/\\/g, '/'),
-          default: true
-        }
-      });
-    }
+    // Save updated metadata
+    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+
+    return res.json({
+      success: true,
+      message: 'Tags updated successfully',
+      tags
+    });
   } catch (error) {
-    console.error('Error setting default asset:', error);
-    res.status(500).json({
+    console.error('Error updating tags:', error);
+    return res.status(500).json({
       success: false,
-      message: 'Failed to set default asset',
-      error: error.message
+      message: 'Internal server error'
     });
   }
 };
