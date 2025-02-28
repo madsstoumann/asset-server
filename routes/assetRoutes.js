@@ -16,9 +16,9 @@ router.get('/asset/:id', validateAssetRequest('get'), getAsset);
 
 // POST upload a new asset
 router.post('/asset/:id', 
-  validateAssetRequest('post'), 
-  validateTags,
-  upload.single('asset'), 
+  validateAssetRequest('post'),
+  upload.single('asset'), // Process multipart form data first
+  validateTags, // Then validate tags from the processed form data
   uploadAsset
 );
 

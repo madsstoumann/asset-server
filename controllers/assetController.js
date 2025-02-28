@@ -109,9 +109,14 @@ export const uploadAsset = (req, res) => {
     const filePath = req.file.path;
     const tags = req.validatedTags || [];
     
+    console.log('Tags received in controller:', tags);
+    console.log('File saved as:', path.basename(filePath));
+    
     // Create metadata
-    const metadata = {
+    const assetMetadata = {
       id,
+      filename: path.basename(filePath),
+      originalname: req.file.originalname,
       path: filePath.replace(/\\/g, '/'),
       tags,
       uploadDate: new Date().toISOString()
@@ -119,12 +124,30 @@ export const uploadAsset = (req, res) => {
 
     // Save metadata
     const metadataPath = path.join(path.dirname(filePath), 'metadata.json');
-    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+    
+    // Check if metadata.json exists already
+    let existingMetadata = { assets: [] };
+    if (fs.existsSync(metadataPath)) {
+      try {
+        existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        if (!existingMetadata.assets) {
+          existingMetadata.assets = [];
+        }
+      } catch (err) {
+        console.error('Error parsing existing metadata:', err);
+      }
+    }
+
+    // Write metadata - merge with existing if needed
+    fs.writeFileSync(metadataPath, JSON.stringify({
+      ...existingMetadata,
+      assets: [...existingMetadata.assets, assetMetadata]
+    }, null, 2));
     
     res.status(201).json({
       success: true,
       message: 'Asset uploaded successfully',
-      asset: metadata
+      asset: assetMetadata
     });
     
   } catch (error) {
@@ -151,6 +174,20 @@ export const getAssetList = (req, res) => {
     }
     
     const files = fs.readdirSync(dir);
+    const metadataPath = path.join(dir, 'metadata.json');
+    let metadataContent = { assets: [] };
+    
+    // Load metadata file if it exists
+    if (fs.existsSync(metadataPath)) {
+      try {
+        const rawData = fs.readFileSync(metadataPath, 'utf8');
+        console.log('Raw metadata content:', rawData);
+        metadataContent = JSON.parse(rawData);
+        if (!metadataContent.assets) metadataContent.assets = [];
+      } catch (err) {
+        console.error('Error reading metadata:', err);
+      }
+    }
     
     // Get details for each file, excluding metadata.json
     const assets = files
@@ -158,18 +195,23 @@ export const getAssetList = (req, res) => {
       .map(file => {
         const filePath = path.join(dir, file);
         const stats = fs.statSync(filePath);
-        const metadataPath = path.join(dir, 'metadata.json');
-        let metadata = {};
         
-        if (fs.existsSync(metadataPath)) {
-          metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
-        }
+        // Find asset metadata by matching filename
+        const assetMetadata = metadataContent.assets.find(a => {
+          if (!a) return false;
+          return a.filename === file || a.path.endsWith(file);
+        });
+        
+        console.log(`File ${file}:`, assetMetadata ? `Metadata found: ${JSON.stringify(assetMetadata.tags)}` : 'No metadata found');
+        
+        // Get tags from metadata if available
+        const tags = assetMetadata?.tags || [];
         
         return {
           name: file,
           path: filePath.replace(/\\/g, '/'),
           size: stats.size,
-          tags: metadata.tags || [],
+          tags,
           createdAt: stats.birthtime,
           modifiedAt: stats.mtime
         };
@@ -191,33 +233,77 @@ export const getAssetList = (req, res) => {
   }
 };
 
-// Remove setDefaultAsset export and function completely
-
 /**
  * Update tags for an existing asset
  */
 export const updateAssetTags = async (req, res) => {
   try {
     const { id } = req.params;
+    const { filename } = req.body;
     const tags = req.validatedTags || [];
     
-    // Read the asset metadata file
-    const metadataPath = path.join(process.cwd(), 'assets', id.slice(0, 2), id.slice(2, 4), id.slice(4, 6), id, 'metadata.json');
+    if (!filename) {
+      return res.status(400).json({
+        success: false,
+        message: 'Filename is required'
+      });
+    }
+    
+    console.log(`Updating tags for ${filename} to:`, tags);
+    
+    // Get directory path
+    const dir = getAssetDirectoryPath(id);
+    const metadataPath = path.join(dir, 'metadata.json');
     
     if (!fs.existsSync(metadataPath)) {
       return res.status(404).json({
         success: false,
-        message: 'Asset not found'
+        message: 'Asset metadata not found'
       });
     }
 
     // Read and parse existing metadata
-    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+    let metadata = { assets: [] };
+    try {
+      metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+      if (!metadata.assets) metadata.assets = [];
+    } catch (err) {
+      console.error('Error reading metadata:', err);
+    }
     
-    // Update tags
-    metadata.tags = tags;
+    // Find the asset in the metadata
+    const assetIndex = metadata.assets.findIndex(asset => 
+      asset && (asset.filename === filename || asset.path.includes(filename))
+    );
+    
+    if (assetIndex === -1) {
+      console.log('No matching asset found in metadata');
+      
+      // Asset not found in metadata, create new entry
+      const filePath = path.join(dir, filename);
+      if (fs.existsSync(filePath)) {
+        metadata.assets.push({
+          id,
+          filename,
+          path: filePath.replace(/\\/g, '/'),
+          tags,
+          updateDate: new Date().toISOString()
+        });
+      } else {
+        return res.status(404).json({
+          success: false,
+          message: 'Asset file not found'
+        });
+      }
+    } else {
+      // Update tags for the existing asset
+      console.log(`Found asset at index ${assetIndex}, updating tags`);
+      metadata.assets[assetIndex].tags = tags;
+      metadata.assets[assetIndex].updateDate = new Date().toISOString();
+    }
     
     // Save updated metadata
+    console.log('Saving updated metadata:', JSON.stringify(metadata, null, 2));
     fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
 
     return res.json({
@@ -229,7 +315,8 @@ export const updateAssetTags = async (req, res) => {
     console.error('Error updating tags:', error);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: 'Internal server error',
+      error: error.message
     });
   }
 };
