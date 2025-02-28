@@ -173,54 +173,70 @@ export const getAssetList = (req, res) => {
       });
     }
     
-    const files = fs.readdirSync(dir);
     const metadataPath = path.join(dir, 'metadata.json');
-    let metadataContent = { assets: [] };
     
-    // Load metadata file if it exists
-    if (fs.existsSync(metadataPath)) {
-      try {
-        const rawData = fs.readFileSync(metadataPath, 'utf8');
-        console.log('Raw metadata content:', rawData);
-        metadataContent = JSON.parse(rawData);
-        if (!metadataContent.assets) metadataContent.assets = [];
-      } catch (err) {
-        console.error('Error reading metadata:', err);
-      }
+    // Check if metadata.json exists
+    if (!fs.existsSync(metadataPath)) {
+      return res.json({
+        success: true,
+        count: 0,
+        assets: []
+      });
     }
     
-    // Get details for each file, excluding metadata.json
-    const assets = files
-      .filter(file => file !== 'metadata.json')
-      .map(file => {
-        const filePath = path.join(dir, file);
+    // Load metadata file
+    let metadataContent;
+    try {
+      const rawData = fs.readFileSync(metadataPath, 'utf8');
+      metadataContent = JSON.parse(rawData);
+    } catch (err) {
+      console.error('Error reading metadata:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to parse metadata file',
+        error: err.message
+      });
+    }
+    
+    // Validate assets array exists
+    if (!metadataContent.assets || !Array.isArray(metadataContent.assets)) {
+      return res.json({
+        success: true,
+        count: 0,
+        assets: []
+      });
+    }
+    
+    // Process each asset from metadata and add file stats
+    const assetsWithStats = metadataContent.assets
+      .filter(asset => {
+        // Ensure the asset exists and has a valid filename
+        if (!asset || !asset.filename) return false;
+        
+        // Check if the file still exists on disk
+        const filePath = path.join(dir, asset.filename);
+        return fs.existsSync(filePath);
+      })
+      .map(asset => {
+        const filePath = path.join(dir, asset.filename);
         const stats = fs.statSync(filePath);
         
-        // Find asset metadata by matching filename
-        const assetMetadata = metadataContent.assets.find(a => {
-          if (!a) return false;
-          return a.filename === file || a.path.endsWith(file);
-        });
-        
-        console.log(`File ${file}:`, assetMetadata ? `Metadata found: ${JSON.stringify(assetMetadata.tags)}` : 'No metadata found');
-        
-        // Get tags from metadata if available
-        const tags = assetMetadata?.tags || [];
-        
         return {
-          name: file,
+          name: asset.filename,
+          originalname: asset.originalname || asset.filename,
           path: filePath.replace(/\\/g, '/'),
           size: stats.size,
-          tags,
+          tags: asset.tags || [],
           createdAt: stats.birthtime,
-          modifiedAt: stats.mtime
+          modifiedAt: stats.mtime,
+          uploadDate: asset.uploadDate || stats.birthtime
         };
       });
     
     res.json({
       success: true,
-      count: assets.length,
-      assets
+      count: assetsWithStats.length,
+      assets: assetsWithStats
     });
     
   } catch (error) {
@@ -317,6 +333,76 @@ export const updateAssetTags = async (req, res) => {
       success: false,
       message: 'Internal server error',
       error: error.message
+    });
+  }
+};
+
+/**
+ * Get allowed tags
+ * Returns the list of tags that are allowed in the system
+ */
+export const getAllowedTags = (req, res) => {
+  try {
+    // Get allowed tags from environment variables
+    const DEFAULT_TAGS = ['front', 'back', 'inside', 'spine'];
+    const configuredTags = process.env.ALLOWED_TAGS
+      ? process.env.ALLOWED_TAGS.split(',').map(tag => tag.trim())
+      : [];
+    
+    const effectiveTags = configuredTags.length > 0 ? configuredTags : DEFAULT_TAGS;
+    
+    return res.json({
+      success: true,
+      tags: effectiveTags
+    });
+  } catch (error) {
+    console.error('Error getting allowed tags:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get allowed tags',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get system configuration
+ * Returns configuration parameters for the client in a simplified format
+ */
+export const getSystemConfig = (req, res) => {
+  try {
+    // Get allowed tags
+    const DEFAULT_TAGS = ['front', 'back', 'inside', 'spine'];
+    const configuredTags = process.env.ALLOWED_TAGS
+      ? process.env.ALLOWED_TAGS.split(',').map(tag => tag.trim())
+      : [];
+    
+    const tags = configuredTags.length > 0 ? configuredTags : DEFAULT_TAGS;
+    
+    // Get allowed widths
+    const widths = process.env.ALLOWED_WIDTHS 
+      ? process.env.ALLOWED_WIDTHS.split(',').map(w => parseInt(w))
+      : [75, 200, 400, 800, 1200, 1600];
+    
+    // Get allowed file types
+    const accept = process.env.ALLOWED_TYPES
+      ? process.env.ALLOWED_TYPES.split(',')
+      : ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
+    
+    // Get maximum file size
+    const maxFileSize = parseInt(process.env.MAX_FILE_SIZE || '10');
+    
+    // Return simplified structure directly
+    return res.json({
+      tags,
+      widths,
+      accept,
+      maxFileSize
+    });
+  } catch (error) {
+    console.error('Error getting system config:', error);
+    res.status(500).json({
+      message: 'Failed to get system configuration'
     });
   }
 };
