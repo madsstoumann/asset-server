@@ -98,56 +98,60 @@ export const getAsset = async (req, res) => {
 // Upload a new asset
 export const uploadAsset = (req, res) => {
   try {
-    if (!req.file) {
+    if (!req.files || req.files.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'No file was uploaded'
+        message: 'No files were uploaded'
       });
     }
     
     const { id } = req.params;
-    const filePath = req.file.path;
     const tags = req.validatedTags || [];
+    const uploadedAssets = [];
     
-    console.log('Tags received in controller:', tags);
-    console.log('File saved as:', path.basename(filePath));
-    
-    // Create metadata
-    const assetMetadata = {
-      id,
-      filename: path.basename(filePath),
-      originalname: req.file.originalname,
-      path: filePath.replace(/\\/g, '/'),
-      tags,
-      uploadDate: new Date().toISOString()
-    };
+    // Process each file
+    for (const file of req.files) {
+      const filePath = file.path;
+      
+      // Create metadata for each file
+      const assetMetadata = {
+        id,
+        filename: path.basename(filePath),
+        originalname: file.originalname,
+        path: filePath.replace(/\\/g, '/'),
+        tags,
+        uploadDate: new Date().toISOString()
+      };
 
-    // Save metadata
-    const metadataPath = path.join(path.dirname(filePath), 'metadata.json');
-    
-    // Check if metadata.json exists already
-    let existingMetadata = { assets: [] };
-    if (fs.existsSync(metadataPath)) {
-      try {
-        existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
-        if (!existingMetadata.assets) {
-          existingMetadata.assets = [];
+      // Save metadata
+      const metadataPath = path.join(path.dirname(filePath), 'metadata.json');
+      
+      // Check if metadata.json exists already
+      let existingMetadata = { assets: [] };
+      if (fs.existsSync(metadataPath)) {
+        try {
+          existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          if (!existingMetadata.assets) {
+            existingMetadata.assets = [];
+          }
+        } catch (err) {
+          console.error('Error parsing existing metadata:', err);
         }
-      } catch (err) {
-        console.error('Error parsing existing metadata:', err);
       }
-    }
 
-    // Write metadata - merge with existing if needed
-    fs.writeFileSync(metadataPath, JSON.stringify({
-      ...existingMetadata,
-      assets: [...existingMetadata.assets, assetMetadata]
-    }, null, 2));
+      // Write metadata - merge with existing if needed
+      fs.writeFileSync(metadataPath, JSON.stringify({
+        ...existingMetadata,
+        assets: [...existingMetadata.assets, assetMetadata]
+      }, null, 2));
+      
+      uploadedAssets.push(assetMetadata);
+    }
     
     res.status(201).json({
       success: true,
-      message: 'Asset uploaded successfully',
-      asset: assetMetadata
+      message: `${uploadedAssets.length} assets uploaded successfully`,
+      assets: uploadedAssets
     });
     
   } catch (error) {
@@ -332,6 +336,130 @@ export const updateAssetTags = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Delete a specific asset by filename
+ */
+export const deleteAsset = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { filename } = req.query;
+    
+    if (!filename) {
+      return res.status(400).json({
+        success: false,
+        message: 'Filename is required as a query parameter'
+      });
+    }
+    
+    console.log(`Attempting to delete asset ${filename} for product ${id}`);
+    
+    // Get directory path
+    const dir = getAssetDirectoryPath(id);
+    const filePath = path.join(dir, filename);
+    const metadataPath = path.join(dir, 'metadata.json');
+    
+    // Check if the file exists
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Asset file not found'
+      });
+    }
+    
+    // Check if metadata exists
+    if (!fs.existsSync(metadataPath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Asset metadata not found'
+      });
+    }
+    
+    // Read and parse existing metadata
+    let metadata = { assets: [] };
+    try {
+      metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+    } catch (err) {
+      console.error('Error reading metadata:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to parse metadata file',
+        error: err.message
+      });
+    }
+    
+    // Find the asset in the metadata
+    const assetIndex = metadata.assets.findIndex(asset => 
+      asset && (asset.filename === filename || asset.path.includes(filename))
+    );
+    
+    if (assetIndex === -1) {
+      console.log('Asset not found in metadata, but file exists');
+    }
+    
+    // Remove file from filesystem
+    try {
+      fs.unlinkSync(filePath);
+      console.log(`File ${filename} deleted successfully`);
+      
+      // Check for cache directories and remove those too
+      const dirContents = fs.readdirSync(dir);
+      dirContents.forEach(item => {
+        const itemPath = path.join(dir, item);
+        if (fs.statSync(itemPath).isDirectory() && item !== 'cache') {
+          // Check if this is a width-specific cache folder
+          const potentialCachePath = path.join(itemPath, filename);
+          if (fs.existsSync(potentialCachePath)) {
+            fs.unlinkSync(potentialCachePath);
+            console.log(`Deleted cached version at: ${potentialCachePath}`);
+          }
+        }
+      });
+      
+      // If there's a cache directory, check for cached versions
+      const cachePath = path.join(dir, 'cache');
+      if (fs.existsSync(cachePath)) {
+        const cacheDirs = fs.readdirSync(cachePath);
+        cacheDirs.forEach(widthDir => {
+          const cachedFilePath = path.join(cachePath, widthDir, filename);
+          if (fs.existsSync(cachedFilePath)) {
+            fs.unlinkSync(cachedFilePath);
+            console.log(`Deleted cached version at width ${widthDir}`);
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error deleting file:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to delete asset file',
+        error: err.message
+      });
+    }
+    
+    // Update metadata if the asset was found
+    if (assetIndex !== -1) {
+      // Remove the asset from the array
+      metadata.assets.splice(assetIndex, 1);
+      
+      // Save updated metadata
+      fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+      console.log(`Asset ${filename} removed from metadata`);
+    }
+    
+    return res.json({
+      success: true,
+      message: `Asset ${filename} deleted successfully`
+    });
+  } catch (error) {
+    console.error('Error deleting asset:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete asset',
       error: error.message
     });
   }

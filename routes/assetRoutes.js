@@ -4,6 +4,7 @@ import {
   uploadAsset, 
   getAssetList, 
   updateAssetTags,
+  deleteAsset,
   getSystemConfig
 } from '../controllers/assetController.js';
 import { upload } from '../middleware/fileUpload.js';
@@ -16,7 +17,7 @@ const router = express.Router();
 router.get('/asset/:id', validateAssetRequest('get'), getAsset);
 router.post('/asset/:id', 
   validateAssetRequest('post'),
-  upload.single('asset'),
+  upload.array('assets', 10), // Allow up to 10 files with field name 'assets'
   validateTags,
   uploadAsset
 );
@@ -26,6 +27,7 @@ router.put('/asset/:id/tags',
   validateTags,
   updateAssetTags
 );
+router.delete('/asset/:id', deleteAsset);
 
 // Configuration endpoint (only keep this one)
 router.get('/config/client', getSystemConfig);
