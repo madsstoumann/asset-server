@@ -31,8 +31,6 @@ const storage = multer.diskStorage({
     try {
       // Get product ID from parameters
       const { id } = req.params;
-      console.log(`Storing files for SKU ${id} in: ${getAssetDirectoryPath(id)}`);
-      
       const dir = path.join(process.cwd(), getAssetDirectoryPath(id));
       
       // Create directory if it doesn't exist
@@ -61,11 +59,9 @@ const storage = multer.diskStorage({
         const timestamp = Date.now();
         const randomNum = Math.floor(Math.random() * 1000000000);
         const newFilename = `${originalName}-${timestamp}-${randomNum}${extension}`;
-        console.log(`File ${originalName}${extension} already exists, using ${newFilename}`);
         cb(null, newFilename);
       } else {
         // If file doesn't exist, use original name
-        console.log(`Using original filename: ${originalName}${extension}`);
         cb(null, `${originalName}${extension}`);
       }
     } catch (error) {

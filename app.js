@@ -37,11 +37,9 @@ app.use(cors({
 
 // Important: Apply image resize middleware BEFORE static middleware
 // This ensures resize requests are handled before serving static files
-console.log('Setting up image resize middleware for path: /assets');
 app.use('/assets', imageMiddleware);
 
 // After the resize middleware, serve static files for unprocessed requests
-console.log('Setting up static file serving for path: /assets');
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 // Routes

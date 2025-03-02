@@ -51,8 +51,29 @@ export const imageMiddleware = async (req, res, next) => {
     const filename = path.basename(originalFilePath);
     const cacheDir = path.join(dir, width.toString());
     const cachedFilePath = path.join(cacheDir, filename);
+    const cachedWebPPath = path.join(cacheDir, `${path.parse(filename).name}.webp`);
 
-    // Check if cached version exists
+    // Check if cached WebP version exists
+    if (fs.existsSync(cachedWebPPath)) {
+      // Serve cached WebP file with Brotli compression if supported
+      if (process.env.ENABLE_COMPRESSION === 'true' && 
+          req.headers['accept-encoding']?.includes('br')) {
+        const compressed = await brotliCompress(fs.readFileSync(cachedWebPPath), {
+          params: {
+            [zlib.constants.BROTLI_PARAM_QUALITY]: parseInt(process.env.COMPRESSION_LEVEL) || 11
+          }
+        });
+        res.setHeader('Content-Encoding', 'br');
+        res.setHeader('Content-Type', 'image/webp');
+        res.setHeader('Cache-Control', 'public, max-age=31536000');
+        return res.send(compressed);
+      }
+      res.setHeader('Content-Type', 'image/webp');
+      res.setHeader('Cache-Control', 'public, max-age=31536000');
+      return res.sendFile(cachedWebPPath);
+    }
+    
+    // Check if cached original format version exists
     if (fs.existsSync(cachedFilePath)) {
       // Serve cached file with Brotli compression if supported
       if (process.env.ENABLE_COMPRESSION === 'true' && 
@@ -73,38 +94,40 @@ export const imageMiddleware = async (req, res, next) => {
     // Create cache directory if it doesn't exist
     fs.mkdirSync(cacheDir, { recursive: true });
 
-    // Process and save the image
-    const imageBuffer = await sharp(originalFilePath)
-      .resize({ 
-        width,
-        withoutEnlargement: true
-      })
-      .toBuffer();
+    // Process and save the image in WebP format
+    const sharpInstance = sharp(originalFilePath).resize({ 
+      width,
+      withoutEnlargement: true
+    });
+    
+    // Save WebP version
+    const webpBuffer = await sharpInstance.clone().webp().toBuffer();
+    fs.writeFileSync(cachedWebPPath, webpBuffer);
+    
+    // Also save original format for compatibility
+    const originalBuffer = await sharpInstance.toBuffer();
+    fs.writeFileSync(cachedFilePath, originalBuffer);
 
-    // Save to cache
-    fs.writeFileSync(cachedFilePath, imageBuffer);
-
-    // Serve with Brotli compression if supported
+    // Serve WebP with Brotli compression if supported
     if (process.env.ENABLE_COMPRESSION === 'true' && 
         req.headers['accept-encoding']?.includes('br')) {
-      const compressed = await brotliCompress(imageBuffer, {
+      const compressed = await brotliCompress(webpBuffer, {
         params: {
           [zlib.constants.BROTLI_PARAM_QUALITY]: parseInt(process.env.COMPRESSION_LEVEL) || 11
         }
       });
       res.setHeader('Content-Encoding', 'br');
-      res.setHeader('Content-Type', `image/${path.extname(filename).substring(1)}`);
+      res.setHeader('Content-Type', 'image/webp');
       res.setHeader('Cache-Control', 'public, max-age=31536000');
       return res.send(compressed);
     }
 
-    // If no compression, send regular response
-    res.setHeader('Content-Type', `image/${path.extname(filename).substring(1)}`);
+    // If no compression, send WebP response
+    res.setHeader('Content-Type', 'image/webp');
     res.setHeader('Cache-Control', 'public, max-age=31536000');
-    return res.send(imageBuffer);
+    return res.send(webpBuffer);
 
   } catch (error) {
-    console.error('Error processing image:', error);
     return next();
   }
 };

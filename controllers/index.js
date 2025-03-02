@@ -72,13 +72,15 @@ export const getAsset = async (req, res) => {
       const metadata = dpi ? { density: parseInt(dpi) } : {};
       
       // Process the image
-      const imageBuffer = await sharp(filePath)
+      const sharpInstance = sharp(filePath)
         .resize(resizeOptions)
-        .withMetadata(metadata)
-        .toBuffer();
+        .withMetadata(metadata);
+      
+      // Convert to WebP format for better compression
+      const imageBuffer = await sharpInstance.webp().toBuffer();
       
       // Set appropriate content type
-      res.set('Content-Type', `image/${fileExt.substring(1)}`);
+      res.set('Content-Type', 'image/webp');
       return res.send(imageBuffer);
     }
     
@@ -86,7 +88,6 @@ export const getAsset = async (req, res) => {
     res.sendFile(path.resolve(filePath));
     
   } catch (error) {
-    console.error('Error getting asset:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve asset',
@@ -135,7 +136,7 @@ export const uploadAsset = (req, res) => {
             existingMetadata.assets = [];
           }
         } catch (err) {
-          console.error('Error parsing existing metadata:', err);
+          // Error parsing existing metadata
         }
       }
 
@@ -155,7 +156,6 @@ export const uploadAsset = (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error uploading asset:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to upload asset',
@@ -194,7 +194,6 @@ export const getAssetList = (req, res) => {
       const rawData = fs.readFileSync(metadataPath, 'utf8');
       metadataContent = JSON.parse(rawData);
     } catch (err) {
-      console.error('Error reading metadata:', err);
       return res.status(500).json({
         success: false,
         message: 'Failed to parse metadata file',
@@ -244,7 +243,6 @@ export const getAssetList = (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error listing assets:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve asset list',
@@ -269,8 +267,6 @@ export const updateAssetTags = async (req, res) => {
       });
     }
     
-    console.log(`Updating tags for ${filename} to:`, tags);
-    
     // Get directory path
     const dir = getAssetDirectoryPath(id);
     const metadataPath = path.join(dir, 'metadata.json');
@@ -288,7 +284,7 @@ export const updateAssetTags = async (req, res) => {
       metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
       if (!metadata.assets) metadata.assets = [];
     } catch (err) {
-      console.error('Error reading metadata:', err);
+      // Error reading metadata
     }
     
     // Find the asset in the metadata
@@ -297,8 +293,6 @@ export const updateAssetTags = async (req, res) => {
     );
     
     if (assetIndex === -1) {
-      console.log('No matching asset found in metadata');
-      
       // Asset not found in metadata, create new entry
       const filePath = path.join(dir, filename);
       if (fs.existsSync(filePath)) {
@@ -317,13 +311,11 @@ export const updateAssetTags = async (req, res) => {
       }
     } else {
       // Update tags for the existing asset
-      console.log(`Found asset at index ${assetIndex}, updating tags`);
       metadata.assets[assetIndex].tags = tags;
       metadata.assets[assetIndex].updateDate = new Date().toISOString();
     }
     
     // Save updated metadata
-    console.log('Saving updated metadata:', JSON.stringify(metadata, null, 2));
     fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
 
     return res.json({
@@ -332,7 +324,6 @@ export const updateAssetTags = async (req, res) => {
       tags
     });
   } catch (error) {
-    console.error('Error updating tags:', error);
     return res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -355,8 +346,6 @@ export const deleteAsset = async (req, res) => {
         message: 'Filename is required as a query parameter'
       });
     }
-    
-    console.log(`Attempting to delete asset ${filename} for product ${id}`);
     
     // Get directory path
     const dir = getAssetDirectoryPath(id);
@@ -384,7 +373,6 @@ export const deleteAsset = async (req, res) => {
     try {
       metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
     } catch (err) {
-      console.error('Error reading metadata:', err);
       return res.status(500).json({
         success: false,
         message: 'Failed to parse metadata file',
@@ -397,14 +385,9 @@ export const deleteAsset = async (req, res) => {
       asset && (asset.filename === filename || asset.path.includes(filename))
     );
     
-    if (assetIndex === -1) {
-      console.log('Asset not found in metadata, but file exists');
-    }
-    
     // Remove file from filesystem
     try {
       fs.unlinkSync(filePath);
-      console.log(`File ${filename} deleted successfully`);
       
       // Check for cache directories and remove those too
       const dirContents = fs.readdirSync(dir);
@@ -415,7 +398,12 @@ export const deleteAsset = async (req, res) => {
           const potentialCachePath = path.join(itemPath, filename);
           if (fs.existsSync(potentialCachePath)) {
             fs.unlinkSync(potentialCachePath);
-            console.log(`Deleted cached version at: ${potentialCachePath}`);
+          }
+          // Also check for WebP version
+          const webpName = `${path.parse(filename).name}.webp`;
+          const potentialWebpPath = path.join(itemPath, webpName);
+          if (fs.existsSync(potentialWebpPath)) {
+            fs.unlinkSync(potentialWebpPath);
           }
         }
       });
@@ -428,12 +416,16 @@ export const deleteAsset = async (req, res) => {
           const cachedFilePath = path.join(cachePath, widthDir, filename);
           if (fs.existsSync(cachedFilePath)) {
             fs.unlinkSync(cachedFilePath);
-            console.log(`Deleted cached version at width ${widthDir}`);
+          }
+          // Also check for WebP version
+          const webpName = `${path.parse(filename).name}.webp`;
+          const cachedWebpPath = path.join(cachePath, widthDir, webpName);
+          if (fs.existsSync(cachedWebpPath)) {
+            fs.unlinkSync(cachedWebpPath);
           }
         });
       }
     } catch (err) {
-      console.error('Error deleting file:', err);
       return res.status(500).json({
         success: false,
         message: 'Failed to delete asset file',
@@ -448,7 +440,6 @@ export const deleteAsset = async (req, res) => {
       
       // Save updated metadata
       fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-      console.log(`Asset ${filename} removed from metadata`);
     }
     
     return res.json({
@@ -456,7 +447,6 @@ export const deleteAsset = async (req, res) => {
       message: `Asset ${filename} deleted successfully`
     });
   } catch (error) {
-    console.error('Error deleting asset:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to delete asset',
@@ -484,7 +474,6 @@ export const getAllowedTags = (req, res) => {
       tags: effectiveTags
     });
   } catch (error) {
-    console.error('Error getting allowed tags:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to get allowed tags',
@@ -528,7 +517,6 @@ export const getSystemConfig = (req, res) => {
       maxFileSize
     });
   } catch (error) {
-    console.error('Error getting system config:', error);
     res.status(500).json({
       message: 'Failed to get system configuration'
     });
