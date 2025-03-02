@@ -1,6 +1,6 @@
 # Asset Server
 
-A robust and efficient server for managing digital assets with automatic image processing, WebP conversion, and tag management.
+A server for managing digital assets with automatic image processing, WebP conversion, and tag management.
 
 ## Features
 
