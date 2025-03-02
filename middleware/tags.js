@@ -6,7 +6,7 @@ dotenv.config();
 // Default tags to use if none are configured
 const DEFAULT_TAGS = ['front', 'back', 'inside', 'spine'];
 
-export const validateTags = (req, res, next) => {
+export const tags = (req, res, next) => {
   console.log('Raw request body:', JSON.stringify(req.body));
   
   // Get the allowed tags inside the function instead of at module scope

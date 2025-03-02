@@ -11,7 +11,7 @@ const allowedWidths = process.env.ALLOWED_WIDTHS
   ? process.env.ALLOWED_WIDTHS.split(',').map(w => parseInt(w))
   : [200, 400, 800, 1200, 1600];
 
-export const imageResizeMiddleware = async (req, res, next) => {
+export const imageMiddleware = async (req, res, next) => {
   if (!req.query.w && !req.query.h) {
     return next();
   }

@@ -6,25 +6,25 @@ import {
   updateAssetTags,
   deleteAsset,
   getSystemConfig
-} from '../controllers/assetController.js';
-import { upload } from '../middleware/fileUpload.js';
-import { validateAssetRequest } from '../middleware/validation.js';
-import { validateTags } from '../middleware/validateTags.js';
+} from '../controllers/index.js';
+import { upload } from '../middleware/upload.js';
+import { validation } from '../middleware/validation.js';
+import { tags } from '../middleware/tags.js';
 
 const router = express.Router();
 
 // Asset endpoints
-router.get('/asset/:id', validateAssetRequest('get'), getAsset);
+router.get('/asset/:id', validation('get'), getAsset);
 router.post('/asset/:id', 
-  validateAssetRequest('post'),
+  validation('post'),
   upload.array('assets', 10), // Allow up to 10 files with field name 'assets'
-  validateTags,
+  tags,
   uploadAsset
 );
-router.get('/asset-list/:id', validateAssetRequest('list'), getAssetList);
+router.get('/asset-list/:id', validation('list'), getAssetList);
 router.put('/asset/:id/tags', 
-  validateAssetRequest('tags'),
-  validateTags,
+  validation('tags'),
+  tags,
   updateAssetTags
 );
 router.delete('/asset/:id', deleteAsset);

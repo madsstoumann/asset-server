@@ -3,19 +3,10 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import assetRoutes from './routes/assetRoutes.js';
-import { imageResizeMiddleware } from './middleware/imageResize.js';
+import routes from './routes/index.js';
+import { imageMiddleware } from './middleware/image.js';
 
-// Configure dotenv first thing to ensure all env vars are loaded
 dotenv.config();
-
-// Confirm env vars are available
-console.log('App configuration:');
-console.log('- PORT:', process.env.PORT);
-console.log('- NODE_ENV:', process.env.NODE_ENV);
-console.log('- ALLOWED_TAGS:', process.env.ALLOWED_TAGS);
-console.log('- ALLOWED_WIDTHS:', process.env.ALLOWED_WIDTHS);
-
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 // Configure CORS
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',')
-  : ['http://localhost:8080', 'http://localhost:5500'];
+  : ['http://localhost:5500'];
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -47,14 +38,14 @@ app.use(cors({
 // Important: Apply image resize middleware BEFORE static middleware
 // This ensures resize requests are handled before serving static files
 console.log('Setting up image resize middleware for path: /assets');
-app.use('/assets', imageResizeMiddleware);
+app.use('/assets', imageMiddleware);
 
 // After the resize middleware, serve static files for unprocessed requests
 console.log('Setting up static file serving for path: /assets');
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 // Routes
-app.use('/api', assetRoutes);
+app.use('/api', routes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

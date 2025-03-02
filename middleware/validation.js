@@ -1,7 +1,5 @@
 import { param, query, validationResult } from 'express-validator';
-
-// Validation middleware for different request types
-export const validateAssetRequest = (type) => {
+export const validation = (type) => {
   switch (type) {
     case 'get':
       return [
