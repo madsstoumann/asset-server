@@ -1,6 +1,6 @@
 {
   "name": "@browser.style/asset-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Asset management server",
   "main": "server.js",
   "type": "module",
@@ -57,7 +57,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/madsstoumannasset-server.git",
+    "url": "git+https://github.com/madsstoumann/asset-server.git",
     "directory": "/"
   },
   "bugs": {
