@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import routes from './routes/index.js';
 import { imageMiddleware } from './middleware/image.js';
+import { videoMiddleware } from './middleware/video.js';
 
 dotenv.config();
 const app = express();
@@ -32,14 +33,16 @@ app.use(cors({
     return callback(null, true);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  credentials: true
+  credentials: true,
+  exposedHeaders: ['Content-Range', 'Accept-Ranges'] // Important for video streaming
 }));
 
-// Important: Apply image resize middleware BEFORE static middleware
-// This ensures resize requests are handled before serving static files
+// Important: Apply specialized middleware BEFORE static middleware
+// Order matters here - video middleware should go first to handle streaming requests
+app.use('/assets', videoMiddleware);
 app.use('/assets', imageMiddleware);
 
-// After the resize middleware, serve static files for unprocessed requests
+// After all specialized middleware, serve static files for unprocessed requests
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 // Routes
