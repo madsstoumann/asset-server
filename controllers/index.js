@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
+import { isVideoFile, getVideoMimeType } from '../middleware/video.js';
+import { isDocumentFile, getDocumentMimeType } from '../middleware/document.js';
+// Remove poster-related import
+// import { createPosterImage } from './video-handler.js';
 
 // Helper function to generate consistent directory path from SKU
 function getAssetDirectoryPath(sku) {
@@ -97,7 +101,7 @@ export const getAsset = async (req, res) => {
 };
 
 // Upload a new asset
-export const uploadAsset = (req, res) => {
+export const uploadAsset = async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
@@ -113,6 +117,22 @@ export const uploadAsset = (req, res) => {
     // Process each file
     for (const file of req.files) {
       const filePath = file.path;
+      const isVideo = isVideoFile(file.originalname);
+      const isDocument = isDocumentFile(file.originalname);
+      
+      // Determine file type
+      let fileType = 'image';
+      let mimeType = file.mimetype;
+      
+      if (isVideo) {
+        fileType = 'video';
+        mimeType = getVideoMimeType(file.originalname);
+        
+        // Remove poster generation code
+      } else if (isDocument) {
+        fileType = 'document';
+        mimeType = getDocumentMimeType(file.originalname);
+      }
       
       // Create metadata for each file
       const assetMetadata = {
@@ -121,8 +141,12 @@ export const uploadAsset = (req, res) => {
         originalname: file.originalname,
         path: filePath.replace(/\\/g, '/'),
         tags,
-        uploadDate: new Date().toISOString()
+        uploadDate: new Date().toISOString(),
+        type: fileType,
+        mimeType: mimeType
       };
+      
+      // Remove poster information
 
       // Save metadata
       const metadataPath = path.join(path.dirname(filePath), 'metadata.json');
@@ -156,6 +180,7 @@ export const uploadAsset = (req, res) => {
     });
     
   } catch (error) {
+    console.error('Upload error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to upload asset',
@@ -211,7 +236,7 @@ export const getAssetList = (req, res) => {
     }
     
     // Process each asset from metadata and add file stats
-    const assetsWithStats = metadataContent.assets
+    let assetsWithStats = metadataContent.assets
       .filter(asset => {
         // Ensure the asset exists and has a valid filename
         if (!asset || !asset.filename) return false;
@@ -224,6 +249,28 @@ export const getAssetList = (req, res) => {
         const filePath = path.join(dir, asset.filename);
         const stats = fs.statSync(filePath);
         
+        // Determine file type
+        let fileType = 'image';
+        let mimeType = null;
+        
+        if (asset.type) {
+          // If type is already in metadata, use that
+          fileType = asset.type;
+          mimeType = asset.mimeType;
+        } else {
+          // Otherwise determine type from file extension
+          const isVideo = isVideoFile(asset.filename);
+          const isDocument = isDocumentFile(asset.filename);
+          
+          if (isVideo) {
+            fileType = 'video';
+            mimeType = getVideoMimeType(asset.filename);
+          } else if (isDocument) {
+            fileType = 'document';
+            mimeType = getDocumentMimeType(asset.filename);
+          }
+        }
+        
         return {
           name: asset.filename,
           originalname: asset.originalname || asset.filename,
@@ -232,9 +279,26 @@ export const getAssetList = (req, res) => {
           tags: asset.tags || [],
           createdAt: stats.birthtime,
           modifiedAt: stats.mtime,
-          uploadDate: asset.uploadDate || stats.birthtime
+          uploadDate: asset.uploadDate || stats.birthtime,
+          type: fileType,
+          mimeType: mimeType || 'application/octet-stream'
         };
       });
+      
+    // Remove duplicates by keeping only the latest version of each file
+    const uniqueAssets = {};
+    
+    // Group assets by filename and keep the most recent one based on uploadDate
+    assetsWithStats.forEach(asset => {
+      const existingAsset = uniqueAssets[asset.name];
+      
+      if (!existingAsset || new Date(asset.uploadDate) > new Date(existingAsset.uploadDate)) {
+        uniqueAssets[asset.name] = asset;
+      }
+    });
+    
+    // Convert back to array
+    assetsWithStats = Object.values(uniqueAssets);
     
     res.json({
       success: true,
